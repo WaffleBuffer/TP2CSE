@@ -1,1 +1,0 @@
-.mem.deps mem.o: mem.c mem.h

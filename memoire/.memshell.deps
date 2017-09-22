@@ -1,1 +1,0 @@
-.memshell.deps memshell.o: memshell.c mem.h common.h

@@ -1,1 +1,0 @@
-.test_init.deps test_init.o: test_init.c mem.h common.h
