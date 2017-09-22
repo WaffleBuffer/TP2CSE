@@ -1,6 +1,5 @@
 #include "mem.h"
 #include <stdio.h>
-#include <commone.h>
 
 struct fb {
 	size_t size;
@@ -21,11 +20,7 @@ void mem_init(char* mem, size_t size) {
 	
 	// Create the head of chained list at 0x0
 	head = (struct fb *) mem;
-	// We need to keep some space for the size of the allocated block, so
-	// we tell to the fb that it has a little bit less available memory so when
-	// we allocated we can safely ad the size of the allocated block without writing it
-	// on previous blocks.
-	head->size = size - sizeof(size_t);
+	head->size = size;
 	head->next = (struct fb*) NULL;
 
 	// Reinitialization of search function to fit_first
@@ -34,49 +29,55 @@ void mem_init(char* mem, size_t size) {
 
 void* mem_alloc(size_t size) {
 
-// TODO : voit feuille Thomas 
-	// Check if size asked allows to write the size of the allocated block
-	if(size > sizeOfMem - sizeof(size_t) {
-		fprintf(stderr, "Size asked too big\n");
-		return NULL;
-	}
-
+	// The slighty modified size asked
+	size_t sizeAsked = 0;
 	// Round the size asked to a multiple of struct fb
 	if( size % sizeof(struct fb) != 0) {
-		size_t sizeAsked = size + (sizeof(struct fb) - size % sizeof(struct fb));
+		sizeAsked = size + (sizeof(struct fb) - size % sizeof(struct fb));
 	}	
 
+	// The total size of octets that won't be available any more.
+	size_t totalAllocated = sizeAsked + sizeof(size_t);
 	// free block found
 	struct fb *freeB = NULL;
-	searchFunction(freeB, size);
+	// We search for a free block with enough space to insert the allocated size
+	searchFunction(freeB, totalAllocated);
 
 	if(freeB == NULL) {
 		fprintf(stderr, "No free block available in memory\n");
 		return NULL;
 	}
 
-	// Searching for previous free block pointer
-	struct fb *prev = head;
-	// If head is not the previous one
-	if(prev != freeB) {
-		while (prev->next != freeB) {
-			if(prev->next == NULL) {
-				fprintf(stderr, "Internal error in mem_alloc\n");
-				return NULL;
-			}
+	// If we need to delete this free block
+	if (totalAllocated == freeB->size) {
+		// Searching for previous free block pointer
+		struct fb *prev = head;
+		// If head is not the previous one
+		if(prev != freeB) {
+			while (prev->next != freeB) {
+				if(prev->next == NULL) {
+					fprintf(stderr, "Internal error in mem_alloc\n");
+					return NULL;
+				}
 
-			prev = prev->next;
+				prev = prev->next;
+			}
 		}
+
+		// Reachain free block list
+		prev->next = freeB->next;
 	}
 
-	// Reachain free block list
-	prev->next = freeB->next;
+	// Write size of the allocated block before the allocated block wich is at the end of the free block
+	*((size_t*) freeB + freeB->size - totalAllocated) = freeB->size; 
 
-	// Write size of the allocated block
-	*((size_t*) freeB) = freeB->size - sizeof(size_t); 
+	// The beginning of the allocated space for the user
+	size_t *userPointer = (size_t *)freeB + freeB->size - sizeAsked;
 
-	// Return the beginning of the allocated block
-	return freeB + sizeof(size_t);
+	// Update the available size in this free block
+	freeB->size -= totalAllocated;
+
+	return userPointer;
 }
 
 void mem_free(void* p) {
