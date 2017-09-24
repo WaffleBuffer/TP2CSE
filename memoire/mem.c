@@ -32,19 +32,29 @@ void mem_init(char* mem, size_t size) {
 void* mem_alloc(size_t size) {
 
 	// The rounded modified size asked
-	size_t sizeAsked = 0;
+	size_t sizeAsked = size;
 	// Round the size asked to a multiple of struct fb
 	if( size % sizeof(struct fb) != 0) {
 		sizeAsked = size + (sizeof(struct fb) - size % sizeof(struct fb));
 	}	
 
-	// The total size of octets that won't be available any more.
+	// The total size that won't be available any more.
 	size_t totalAllocated = sizeAsked + sizeof(size_t);
 	// free block found
 	struct fb *freeB = NULL;
 	// We search for a free block with enough space to insert the allocated size
-	searchFunction(freeB, totalAllocated);
+	// Also the search function will ensure that the free block will be either just small enough to be 
+	// totally allocated or big enough to still have a correct struct fb.
+	// It will also ensure that if the free block is the head, it will be big enough to contain its own struct fb.
+	freeB = searchFunction(freeB, totalAllocated);
 
+	// If we didn't find a free block with rounded size, then search with exact size.
+	if(freeB == NULL) {
+		sizeAsked = size;
+		totalAllocated = sizeAsked + sizeof(size_t);
+		freeB = searchFunction(freeB, totalAllocated);
+	}
+	// If we found nothing here, then there isn't enough available memory.
 	if(freeB == NULL) {
 		fprintf(stderr, "No free block available in memory\n");
 		return NULL;
@@ -54,7 +64,7 @@ void* mem_alloc(size_t size) {
 	if (totalAllocated == freeB->size && freeB != head) {
 		// Searching for previous free block pointer
 		struct fb *prev = head;
-		// If head is not the previous one
+		// If head is not the allocated one
 		if(prev != freeB) {
 			while (prev->next != freeB) {
 				if(prev->next == NULL) {
@@ -70,14 +80,27 @@ void* mem_alloc(size_t size) {
 		prev->next = freeB->next;
 	}
 
-	// Write size of the allocated block before the allocated block wich is at the end of the free block
-	*((size_t*) freeB + freeB->size - totalAllocated) = freeB->size; 
 
 	// The beginning of the allocated space for the user
-	void *userPointer = freeB + freeB->size - sizeAsked;
+	void *userPointer = freeB + (freeB->size - 1) - sizeAsked;
 
-	// Update the available size in this free block
-	freeB->size -= totalAllocated;
+	size_t freeBSize = freeB->size;
+
+
+	size_t *allocatedBlockSize = userPointer - sizeof(size_t);
+	printf("fb : %p, fbSize : %zu, up : %p, sizeof(size_t) : %zu, sizeof(struct) : %zu, sizeAsked : %zu\n", (size_t *)freeB, freeBSize, userPointer, sizeof(size_t), sizeof(struct fb), sizeAsked);
+	printf("user pointer - sizeof(size_t) = %p\n", 	allocatedBlockSize);
+	printf("user pointer - 1 = %p\n", 	((size_t*) userPointer - 1));
+	printf("whats %zu\n", *allocatedBlockSize);
+	// Write size of the allocated block before the allocated block wich is at the end of the free block
+	*allocatedBlockSize = sizeAsked;
+
+	printf("patate\n");
+
+	// Update the available size in this free block only if freeB will stay (if the block wasn't totally allocated)
+	if(freeBSize >= totalAllocated + sizeof(struct fb)) {
+		freeB->size -= totalAllocated;
+	}
 
 	return userPointer;
 }
@@ -150,14 +173,29 @@ void mem_free(void* p) {
 /* Itérateur sur le contenu de l'allocateur */
 void mem_show(void (*print)(void *, size_t, int free)) {
 
+	// We print the head only if its size is > 0 (because we never erase head)
 	struct fb *currentFb = head;
+	if(currentFb->size > 0) {
+		print(currentFb, currentFb->size, 1);
+	}
+
+	// If there is an allocated block next to the current one
+	if((size_t)currentFb + currentFb->size < sizeOfMem) {
+		void *p = currentFb + currentFb->size + sizeof(size_t);
+		// Get the size of the allocated block
+		size_t blockSize = *((size_t*)p - sizeof(size_t));
+
+		print(p, blockSize, 0);
+	}
+
+	currentFb = currentFb->next;
 	// We read one free block then the next allocated one (since there's can't be 2 free block next to each other)
 	while (currentFb != NULL) {
 
 		print(currentFb, currentFb->size, 1);
 
-		// If there is an allocated block next to the current fb
-		if((size_t)currentFb + currentFb->size == sizeOfMem) {
+		// If there is an allocated block next to the current one
+		if((size_t)currentFb + currentFb->size != sizeOfMem) {
 			void *p = currentFb + currentFb->size + sizeof(size_t);
 			// Get the size of the allocated block
 			size_t blockSize = *((size_t*)p - sizeof(size_t));
@@ -173,7 +211,31 @@ void mem_fit(mem_fit_function_t* function) {
 	searchFunction = function;
 }
 
+// We search for the first free block with enough space to insert the allocated size
+// Also the search function will ensure that the free block will be either just small enough to be 
+// totally allocated or big enough to still have a correct struct fb.
+// It will also ensure that if the free block is the head, it will be big enough to contain its struct fb.
 struct fb* mem_fit_first(struct fb* fb, size_t size) {
+	fb = head;
+
+	// Test the head with all constraints
+	if(fb->size >= size + sizeof(struct fb)) {
+		return fb;
+	}
+	else {
+		fb = fb->next;
+	}
+
+	while (fb != NULL) {
+
+		// We ensure that either the block will be totally allocated, or either there will be still enough place to 
+		// have the struct fb
+		if(fb->size >= size && (fb->size - size == 0 || fb->size - size >= sizeof(struct fb)) ) {
+			break;
+		}
+		fb = fb->next;
+	}
+
 	return fb;
 }
 
