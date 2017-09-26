@@ -8,6 +8,8 @@ struct fb {
 
 // Head of free block chained list
 struct fb *head;
+// Adress of the end of memory
+struct fb *end;
 
 // Current selected free block searching function
 mem_fit_function_t *searchFunction;
@@ -25,8 +27,10 @@ void mem_init(char* mem, size_t size) {
 	head->size = size;
 	head->next = NULL;
 
+	end = (struct fb *)head + head->size;
+
 	// Reinitialization of search function to fit_first
-	mem_fit(&mem_fit_first);
+	mem_fit(mem_fit_first);
 }
 
 void* mem_alloc(size_t size) {
@@ -36,7 +40,7 @@ void* mem_alloc(size_t size) {
 	// Round the size asked to a multiple of struct fb
 	if( size % sizeof(struct fb) != 0) {
 		sizeAsked = size + (sizeof(struct fb) - size % sizeof(struct fb));
-	}	
+	}
 
 	// The total size that won't be available any more.
 	size_t totalAllocated = sizeAsked + sizeof(size_t);
@@ -82,20 +86,21 @@ void* mem_alloc(size_t size) {
 
 
 	// The beginning of the allocated space for the user
-	void *userPointer = freeB + (freeB->size - 1) - sizeAsked;
+	void *userPointer = (void*)freeB + freeB->size - sizeAsked;
 
 	size_t freeBSize = freeB->size;
 
 
-	size_t *allocatedBlockSize = userPointer - sizeof(size_t);
-	printf("fb : %p, fbSize : %zu, up : %p, sizeof(size_t) : %zu, sizeof(struct) : %zu, sizeAsked : %zu\n", (size_t *)freeB, freeBSize, userPointer, sizeof(size_t), sizeof(struct fb), sizeAsked);
-	printf("user pointer - sizeof(size_t) = %p\n", 	allocatedBlockSize);
+	size_t *allocatedBlockSizePointer = (void *) userPointer - sizeof(size_t);
+	/*printf("fb : %p, fbSize : %zu, up : %p, sizeof(size_t) : %zu, sizeof(struct) : %zu, sizeAsked : %zu\n", (size_t *)freeB, freeBSize, userPointer, sizeof(size_t), sizeof(struct fb), sizeAsked);
+	printf("user pointer - sizeof(size_t) = %p\n", 	allocatedBlockSizePointer);
 	printf("user pointer - 1 = %p\n", 	((size_t*) userPointer - 1));
-	printf("whats %zu\n", *allocatedBlockSize);
-	// Write size of the allocated block before the allocated block wich is at the end of the free block
-	*allocatedBlockSize = sizeAsked;
+	printf("whats %zu\n", *allocatedBlockSizePointer);*/
 
-	printf("patate\n");
+	//printf("user pointer : %p; size pointer : %p, size writen %zu\n", userPointer, allocatedBlockSizePointer, sizeAsked);
+	// Write size of the allocated block before the allocated block wich is at the end of the free block
+	*allocatedBlockSizePointer = sizeAsked;
+
 
 	// Update the available size in this free block only if freeB will stay (if the block wasn't totally allocated)
 	if(freeBSize >= totalAllocated + sizeof(struct fb)) {
@@ -105,9 +110,10 @@ void* mem_alloc(size_t size) {
 	return userPointer;
 }
 
+// Get the size of an allocated block by reading it with a (little) validity check.
 size_t mem_get_size(void * p) {
 	// Get the size of the allocated block
-	size_t blockSize = *((size_t*)p - sizeof(size_t));
+	size_t blockSize = *((size_t *)((void*)p - sizeof(size_t)));
 
 	// Test if the pointer is effectively one that we could have allocate
 	if(blockSize % sizeof(struct fb) != 0) {
@@ -124,11 +130,11 @@ void mem_free(void* p) {
 	size_t blockSize = mem_get_size(p);
 
 	// The total size that need to be freed
-	size_t totalSize = blockSize + sizeof(size_t);
+	size_t totalAllocatedSize = blockSize + sizeof(size_t);
 
-	// Check if there is a previous free block next to it
+	// Find the previous free block
 	struct fb *prev = head;
-	while (prev->next < (struct fb *)p) {
+	while (prev->next != NULL && (void*)prev->next < (void*)p) {
 
 		if(prev->next == NULL) {
 			fprintf(stderr, "Internal error in mem_free\n");
@@ -142,66 +148,74 @@ void mem_free(void* p) {
 
 
 	// Boolean to flag if we need to fusion with previouse and/or next free block.
-	int prevFusion = prev + prev->size == p - sizeof(size_t);;
+	printf("prev : %p, p : %p, size : %zu\n", prev, p, blockSize);
+	int prevFusion = (void*)prev + prev->size == (void *)p - sizeof(size_t);
 	int nextFusion = 0;
 	// Test if next fb is right next to it (no allocated space between)
 	if(nextFb != NULL) {
-		nextFusion = nextFb == p + blockSize;
+		nextFusion = (void*)nextFb == (void *)p + blockSize;
 	}
 
 	// For each cases
 	if(prevFusion && nextFusion) {
-		prev->size += totalSize + nextFb->size;
+		prev->size += totalAllocatedSize + nextFb->size;
 		prev->next = nextFb->next;
+		printf("patate 1\n");
 	}
 	else if(prevFusion) {
-		prev->size += totalSize;
+		prev->size += totalAllocatedSize;
+		printf("patate 2\n");
 	}
 	else if(nextFusion) {
-		nextFb = (struct fb*)((size_t*)p - sizeof(size_t));
-		nextFb->size += totalSize;
+		size_t nextFbSize = nextFb->size + totalAllocatedSize;
+		nextFb = ((void*)p - sizeof(size_t));
+		nextFb->size += nextFbSize;
+		printf("patate 3\n");
 	}
 	// Create a new fb
 	else {
-		struct fb *newFb = (struct fb*)((size_t*)p - sizeof(size_t));
-		newFb->size = totalSize;
+		struct fb *newFb = ((void*)p - sizeof(size_t));
+		newFb->size = totalAllocatedSize;
 		newFb->next = prev->next;
 		prev->next = newFb;
+		printf("patate 4\n");
 	}
 }
 
 /* Itérateur sur le contenu de l'allocateur */
 void mem_show(void (*print)(void *, size_t, int free)) {
 
-	// We print the head only if its size is > 0 (because we never erase head)
 	struct fb *currentFb = head;
-	if(currentFb->size > 0) {
-		print(currentFb, currentFb->size, 1);
-	}
 
-	// If there is an allocated block next to the current one
-	if((size_t)currentFb + currentFb->size < sizeOfMem) {
-		void *p = currentFb + currentFb->size + sizeof(size_t);
-		// Get the size of the allocated block
-		size_t blockSize = *((size_t*)p - sizeof(size_t));
+	while(currentFb != NULL) {
+		// This verification is for the head, because the head will always exist
+		if(currentFb->size > 0) {
+			print(currentFb, currentFb->size, 1);
+		}
 
-		print(p, blockSize, 0);
-	}
 
-	currentFb = currentFb->next;
-	// We read one free block then the next allocated one (since there's can't be 2 free block next to each other)
-	while (currentFb != NULL) {
+		size_t allocatedSize = 0;
 
-		print(currentFb, currentFb->size, 1);
-
-		// If there is an allocated block next to the current one
-		if((size_t)currentFb + currentFb->size != sizeOfMem) {
-			void *p = currentFb + currentFb->size + sizeof(size_t);
+		// Where is the next free block
+		struct fb *nextBlock;
+		// If there is one then it's its memory
+		if(currentFb->next != NULL) {
+			nextBlock = currentFb->next;
+		}
+		// If there is no next free block then it's the end of memory
+		else {
+			nextBlock = end;
+		}
+		// Iterate over all allocated blocks between 2 free blocks
+		while((struct fb *)currentFb + currentFb->size + allocatedSize < (struct fb *)nextBlock) {
+			void *p = (void *)currentFb + currentFb->size + allocatedSize + sizeof(size_t);
 			// Get the size of the allocated block
-			size_t blockSize = *((size_t*)p - sizeof(size_t));
+			size_t blockSize = *((size_t *)((void*)p - sizeof(size_t)));
 
+			allocatedSize += blockSize + sizeof(size_t);
 			print(p, blockSize, 0);
 		}
+
 
 		currentFb = currentFb->next;
 	}
