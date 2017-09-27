@@ -27,7 +27,7 @@ void mem_init(char* mem, size_t size) {
 	head->size = size;
 	head->next = NULL;
 
-	end = (struct fb *)head + head->size;
+	end = (void *)head + head->size;
 
 	// Reinitialization of search function to fit_first
 	mem_fit(mem_fit_first);
@@ -160,17 +160,18 @@ void mem_free(void* p) {
 	if(prevFusion && nextFusion) {
 		prev->size += totalAllocatedSize + nextFb->size;
 		prev->next = nextFb->next;
-		printf("patate 1\n");
 	}
 	else if(prevFusion) {
 		prev->size += totalAllocatedSize;
-		printf("patate 2\n");
 	}
 	else if(nextFusion) {
 		size_t nextFbSize = nextFb->size + totalAllocatedSize;
-		nextFb = ((void*)p - sizeof(size_t));
-		nextFb->size += nextFbSize;
-		printf("patate 3\n");
+		struct fb *nextFbNext = nextFb->next;
+		//printf("next %p, next size %zu, newFbSize : %zu\n", nextFb, nextFb->size, nextFbSize);
+		nextFb = (struct fb *)((void*)p - sizeof(size_t));
+		nextFb->size = nextFbSize;
+		nextFb->next = nextFbNext;
+		prev->next = nextFb;
 	}
 	// Create a new fb
 	else {
@@ -178,7 +179,6 @@ void mem_free(void* p) {
 		newFb->size = totalAllocatedSize;
 		newFb->next = prev->next;
 		prev->next = newFb;
-		printf("patate 4\n");
 	}
 }
 
@@ -194,7 +194,8 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 		}
 
 
-		size_t allocatedSize = 0;
+		// The pointer to the current allocated block
+		void *allocatedPointer = (void *)((void *)currentFb + currentFb->size + sizeof(size_t));
 
 		// Where is the next free block
 		struct fb *nextBlock;
@@ -207,13 +208,18 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 			nextBlock = end;
 		}
 		// Iterate over all allocated blocks between 2 free blocks
-		while((struct fb *)currentFb + currentFb->size + allocatedSize < (struct fb *)nextBlock) {
-			void *p = (void *)currentFb + currentFb->size + allocatedSize + sizeof(size_t);
-			// Get the size of the allocated block
-			size_t blockSize = *((size_t *)((void*)p - sizeof(size_t)));
+		while( allocatedPointer <= (void*)nextBlock) {
 
-			allocatedSize += blockSize + sizeof(size_t);
-			print(p, blockSize, 0);
+			//printf("allocated pointer : %p\n", allocatedPointer);
+			//printf("nextBlock %p\n", nextBlock);
+
+			// Get the size of the allocated block
+			size_t blockSize = *(size_t *)((void *)allocatedPointer - sizeof(size_t));
+
+			//printf("prev : %p; prevSize : %zu; allocated pointer : %p, size : %zu\n", currentFb, currentFb->size, allocatedPointer, blockSize);
+			print(allocatedPointer, blockSize, 0);
+
+			allocatedPointer = (void*) ((void*)allocatedPointer + blockSize + sizeof(size_t));
 		}
 
 
