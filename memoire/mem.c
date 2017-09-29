@@ -39,6 +39,11 @@ void mem_init(char* mem, size_t size) {
 
 void* mem_alloc(size_t size) {
 
+	// Like standard malloc, return NULL pointer on size 0
+	if(size == 0) {
+		return NULL;
+	}
+
 	// The rounded modified size asked
 	size_t sizeAsked = size;
 	// Round the size asked to a multiple of struct fb
@@ -46,22 +51,22 @@ void* mem_alloc(size_t size) {
 		sizeAsked = size + (sizeof(struct fb) - size % sizeof(struct fb));
 	}
 
-	// The total size that won't be available any more.
+	// The total size that won't be available any more
 	size_t totalAllocated = sizeAsked + sizeof(size_t);
 	// free block found
 	struct fb *freeB = NULL;
 	// We search for a free block with enough space to insert the allocated size
 	// Also the search function will ensure that the free block will be either just small enough to be 
-	// totally allocated or big enough to still have a correct struct fb.
+	// totally allocated or big enough to still have a correct struct fb
 	freeB = searchFunction(freeB, totalAllocated);
 
-	// If we didn't find a free block with rounded size, then search with exact size.
+	// If we didn't find a free block with rounded size, then search with exact size
 	if(freeB == NULL) {
 		sizeAsked = size;
 		totalAllocated = sizeAsked + sizeof(size_t);
 		freeB = searchFunction(freeB, totalAllocated);
 	}
-	// If we found nothing here, then there isn't enough available memory.
+	// If we found nothing here, then there isn't enough available memory
 	if(freeB == NULL) {
 		fprintf(stderr, "No free block available in memory\n");
 		return NULL;
@@ -113,7 +118,7 @@ void* mem_alloc(size_t size) {
 	return userPointer;
 }
 
-// Get the size of an allocated block by reading it with a (little) validity check.
+// Get the size of an allocated block by reading it with a (little) validity check
 size_t mem_get_size(void * p) {
 	// Get the size of the allocated block
 	size_t blockSize = *((size_t *)((void*)p - sizeof(size_t)));
@@ -145,16 +150,18 @@ void mem_free(void* p) {
 	}
 	else {
 		if (head != NULL) {
-			while (prev->next != NULL && (void*)prev->next < (void*)p) {
 
-				prev = prev->next;
+			nextFb = head;
+			while (nextFb != NULL && (void*)nextFb > (void*)p) {
+
+				nextFb = nextFb->next;
 			}
 		}
 	}
 
 
 	printf("prev : %p, p : %p, size : %zu\n", prev, p, blockSize);
-	// Boolean to flag if we need to fusion with previouse and/or next free block.
+	// Boolean to flag if we need to fusion with previouse and/or next free block
 	int prevFusion = 0;
 	int nextFusion = 0;
 
@@ -181,7 +188,14 @@ void mem_free(void* p) {
 		nextFb = (struct fb *)((void*)p - sizeof(size_t));
 		nextFb->size = nextFbSize;
 		nextFb->next = nextFbNext;
-		prev->next = nextFb;
+		// If there was a previous free block, reassign its pointer
+		if(prev != NULL) {
+			prev->next = nextFb;
+		}
+		// If the next free block was the first in the list, then update head
+		else {
+			head = nextFb;
+		}
 	}
 	// Create a new fb
 	else {
@@ -285,7 +299,7 @@ void mem_fit(mem_fit_function_t* function) {
 
 // We search for the first free block with enough space to insert the allocated size
 // Also the search function will ensure that the free block will be either just small enough to be 
-// totally allocated or big enough to still have a correct struct fb.
+// totally allocated or big enough to still have a correct struct fb
 struct fb* mem_fit_first(struct fb* fb, size_t size) {
 	fb = head;
 

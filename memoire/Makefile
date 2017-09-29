@@ -4,10 +4,10 @@ CC=gcc
 # on Debian/Ubuntu)
 #HOST32= -m32
 
-CFLAGS= $(HOST32) -Wall -Werror -std=c99 -g -DMEMORY_SIZE=128000
+CFLAGS= $(HOST32) -Wall -Werror -std=c99 -g -DMEMORY_SIZE=128000 -DDEBUG=1
 CFLAGS+= -DDEBUG
 LDFLAGS= $(HOST32)
-TESTS+=test_init
+TESTS+=test_init testFree
 PROGRAMS=memshell $(TESTS)
 
 .PHONY: clean all test_ls
