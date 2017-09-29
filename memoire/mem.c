@@ -9,7 +9,9 @@ struct fb {
 // Head of free block chained list
 struct fb *head;
 // Adress of the end of memory
-struct fb *end;
+void *end;
+// Adress of the beginning of the memory
+void *begin;
 
 // Current selected free block searching function
 mem_fit_function_t *searchFunction;
@@ -23,11 +25,13 @@ void mem_init(char* mem, size_t size) {
 	sizeOfMem = size;
 	
 	// Create the head of chained list at 0x0
-	head = (struct fb *) mem;
-	head->size = size;
-	head->next = NULL;
+	struct fb *firstFb = (struct fb *) mem;
+	firstFb->size = size;
+	firstFb->next = NULL;
+	head = firstFb;
 
-	end = (void *)head + head->size;
+	end = (void *)firstFb + firstFb->size;
+	begin = (void *)mem;
 
 	// Reinitialization of search function to fit_first
 	mem_fit(mem_fit_first);
@@ -49,7 +53,6 @@ void* mem_alloc(size_t size) {
 	// We search for a free block with enough space to insert the allocated size
 	// Also the search function will ensure that the free block will be either just small enough to be 
 	// totally allocated or big enough to still have a correct struct fb.
-	// It will also ensure that if the free block is the head, it will be big enough to contain its own struct fb.
 	freeB = searchFunction(freeB, totalAllocated);
 
 	// If we didn't find a free block with rounded size, then search with exact size.
@@ -64,8 +67,8 @@ void* mem_alloc(size_t size) {
 		return NULL;
 	}
 
-	// If we need to delete this free block. Also make sure that we keep head (even if it is empty).
-	if (totalAllocated == freeB->size && freeB != head) {
+	// Rechain free block list if needed
+	if (totalAllocated == freeB->size) {
 		// Searching for previous free block pointer
 		struct fb *prev = head;
 		// If head is not the allocated one
@@ -115,12 +118,6 @@ size_t mem_get_size(void * p) {
 	// Get the size of the allocated block
 	size_t blockSize = *((size_t *)((void*)p - sizeof(size_t)));
 
-	// Test if the pointer is effectively one that we could have allocate
-	if(blockSize % sizeof(struct fb) != 0) {
-		fprintf(stderr, "Invalid pointer to get size\n");
-		return 0;
-	}
-
 	return blockSize;
 }
 
@@ -134,23 +131,36 @@ void mem_free(void* p) {
 
 	// Find the previous free block
 	struct fb *prev = head;
-	while (prev->next != NULL && (void*)prev->next < (void*)p) {
+	if (head != NULL) {
+		while (prev->next != NULL && (void*)prev->next < (void*)p) {
 
-		if(prev->next == NULL) {
-			fprintf(stderr, "Internal error in mem_free\n");
-			return;
+			prev = prev->next;
 		}
-		prev = prev->next;
 	}
 
 	// Get the following one
-	struct fb *nextFb = prev->next;
+	struct fb *nextFb = NULL;
+	if(prev != NULL) {
+		nextFb = prev->next;
+	}
+	else {
+		if (head != NULL) {
+			while (prev->next != NULL && (void*)prev->next < (void*)p) {
+
+				prev = prev->next;
+			}
+		}
+	}
 
 
-	// Boolean to flag if we need to fusion with previouse and/or next free block.
 	printf("prev : %p, p : %p, size : %zu\n", prev, p, blockSize);
-	int prevFusion = (void*)prev + prev->size == (void *)p - sizeof(size_t);
+	// Boolean to flag if we need to fusion with previouse and/or next free block.
+	int prevFusion = 0;
 	int nextFusion = 0;
+
+	if(prev != NULL) {
+		prevFusion = (void*)prev + prev->size == (void *)p - sizeof(size_t);
+	}
 	// Test if next fb is right next to it (no allocated space between)
 	if(nextFb != NULL) {
 		nextFusion = (void*)nextFb == (void *)p + blockSize;
@@ -177,8 +187,21 @@ void mem_free(void* p) {
 	else {
 		struct fb *newFb = ((void*)p - sizeof(size_t));
 		newFb->size = totalAllocatedSize;
-		newFb->next = prev->next;
-		prev->next = newFb;
+
+		// If there is no free block then this become head
+		if (head == NULL) {
+			head = newFb;
+		}
+		// If this is the new first free block
+		else if (newFb < head) {
+			newFb->next = head;
+			head = newFb;
+		}
+		// Normal case (previous free block exists)
+		else {
+			newFb->next = prev->next;
+			prev->next = newFb;
+		}
 	}
 }
 
@@ -187,12 +210,41 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 
 	struct fb *currentFb = head;
 
-	while(currentFb != NULL) {
-		// This verification is for the head, because the head will always exist
-		if(currentFb->size > 0) {
-			print(currentFb, currentFb->size, 1);
+	// Display all allocated blocks which are before head
+	if((void *)currentFb != begin) {
+		// The pointer to the current allocated block
+		void *allocatedPointer = begin;
+
+		// If there is no free block then it's end of memory
+		if(currentFb == NULL) {
+			currentFb = (struct fb *)end;
 		}
 
+		// Iterate over all allocated blocks before first free block
+		while( allocatedPointer <= (void*)currentFb) {
+
+			//printf("allocated pointer : %p\n", allocatedPointer);
+			//printf("currentFb %p\n", currentFb);
+
+			// Get the size of the allocated block
+			size_t blockSize = *(size_t *)((void *)allocatedPointer - sizeof(size_t));
+
+			//printf("prev : %p; prevSize : %zu; allocated pointer : %p, size : %zu\n", currentFb, currentFb->size, allocatedPointer, blockSize);
+			print(allocatedPointer, blockSize, 0);
+
+			allocatedPointer = (void*) ((void*)allocatedPointer + blockSize + sizeof(size_t));
+		}
+	}
+
+	// Iterate over free blocks
+	while(currentFb != NULL) {
+			
+		print(currentFb, currentFb->size, 1);
+
+		// If we are at the end
+		if ((void *)currentFb + currentFb->size >= end) {
+			break;
+		}
 
 		// The pointer to the current allocated block
 		void *allocatedPointer = (void *)((void *)currentFb + currentFb->size + sizeof(size_t));
@@ -234,17 +286,16 @@ void mem_fit(mem_fit_function_t* function) {
 // We search for the first free block with enough space to insert the allocated size
 // Also the search function will ensure that the free block will be either just small enough to be 
 // totally allocated or big enough to still have a correct struct fb.
-// It will also ensure that if the free block is the head, it will be big enough to contain its struct fb.
 struct fb* mem_fit_first(struct fb* fb, size_t size) {
 	fb = head;
 
 	// Test the head with all constraints
-	if(fb->size >= size + sizeof(struct fb)) {
+	/*if(fb->size >= size + sizeof(struct fb)) {
 		return fb;
 	}
 	else {
 		fb = fb->next;
-	}
+	}*/
 
 	while (fb != NULL) {
 
