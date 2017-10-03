@@ -96,6 +96,14 @@ void* mem_alloc(size_t size) {
 	// The beginning of the allocated space for the user
 	void *userPointer = (void*)freeB + freeB->size - sizeAsked;
 
+	struct fb *newFb = ((void*)userPointer - sizeof(size_t));
+	if(newFb == freeB && (sizeAsked < freeB->size - sizeof(struct fb))) {
+		printf("AAAAAAAAAAAAAAAH\n");
+	}
+	if (newFb < freeB) {
+		printf("AAAAAAAAAAAAAAAH2\n");
+	}
+
 	size_t freeBSize = freeB->size;
 
 
@@ -111,6 +119,7 @@ void* mem_alloc(size_t size) {
 
 
 	// Update the available size in this free block only if freeB will stay (if the block wasn't totally allocated)
+	// So we don't override the size of the allocated block
 	if(freeBSize >= totalAllocated + sizeof(struct fb)) {
 		freeB->size -= totalAllocated;
 	}
@@ -124,6 +133,13 @@ size_t mem_get_size(void * p) {
 	size_t blockSize = *((size_t *)((void*)p - sizeof(size_t)));
 
 	return blockSize;
+}
+
+// DEBUG
+void afficher_zone1(void *adresse, size_t taille, int free)
+{
+  printf("Zone %s, Adresse : %p, Taille : %lu\n", free?"libre  ":"occupee",
+         adresse, (unsigned long) taille);
 }
 
 void mem_free(void* p) {
@@ -140,6 +156,12 @@ void mem_free(void* p) {
 		while (prev->next != NULL && (void*)prev->next < (void*)p) {
 
 			prev = prev->next;
+		}
+
+		// If trying to free inside a free block
+		if(prev != NULL && (void *)prev + prev->size > (void *)p) {
+			fprintf(stderr, "Error : trying to free a free block\n");
+			return;
 		}
 	}
 
@@ -160,7 +182,7 @@ void mem_free(void* p) {
 	}
 
 
-	printf("prev : %p, p : %p, size : %zu\n", prev, p, blockSize);
+	//printf("prev : %p, p : %p, size : %zu\n", prev, p, blockSize);
 	// Boolean to flag if we need to fusion with previouse and/or next free block
 	int prevFusion = 0;
 	int nextFusion = 0;
@@ -177,9 +199,11 @@ void mem_free(void* p) {
 	if(prevFusion && nextFusion) {
 		prev->size += totalAllocatedSize + nextFb->size;
 		prev->next = nextFb->next;
+		//printf("patate 1\n");
 	}
 	else if(prevFusion) {
 		prev->size += totalAllocatedSize;
+		//printf("patate 2\n");
 	}
 	else if(nextFusion) {
 		size_t nextFbSize = nextFb->size + totalAllocatedSize;
@@ -196,6 +220,7 @@ void mem_free(void* p) {
 		else {
 			head = nextFb;
 		}
+		//printf("patate 3\n");
 	}
 	// Create a new fb
 	else {
@@ -205,16 +230,19 @@ void mem_free(void* p) {
 		// If there is no free block then this become head
 		if (head == NULL) {
 			head = newFb;
+			//printf("patate 4.1\n");
 		}
 		// If this is the new first free block
 		else if (newFb < head) {
 			newFb->next = head;
 			head = newFb;
+			//printf("patate 4.2\n");
 		}
 		// Normal case (previous free block exists)
 		else {
 			newFb->next = prev->next;
 			prev->next = newFb;
+			//printf("patate 4.3\n");
 		}
 	}
 }
@@ -223,6 +251,8 @@ void mem_free(void* p) {
 void mem_show(void (*print)(void *, size_t, int free)) {
 
 	struct fb *currentFb = head;
+
+	size_t totalSize = 0;
 
 	// Display all allocated blocks which are before head
 	if((void *)currentFb != begin) {
@@ -243,8 +273,14 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 			// Get the size of the allocated block
 			size_t blockSize = *(size_t *)((void *)allocatedPointer - sizeof(size_t));
 
+			// BUG: some times, we found allocated blocks of size 0, so this is a temporary fix for debug.
+			if(blockSize > 0) {
+				print(allocatedPointer, blockSize, 0);
+				totalSize += blockSize + sizeof(size_t);
+			}
+
 			//printf("prev : %p; prevSize : %zu; allocated pointer : %p, size : %zu\n", currentFb, currentFb->size, allocatedPointer, blockSize);
-			print(allocatedPointer, blockSize, 0);
+			
 
 			allocatedPointer = (void*) ((void*)allocatedPointer + blockSize + sizeof(size_t));
 		}
@@ -254,6 +290,7 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 	while(currentFb != NULL) {
 			
 		print(currentFb, currentFb->size, 1);
+		totalSize += currentFb->size;
 
 		// If we are at the end
 		if ((void *)currentFb + currentFb->size >= end) {
@@ -271,7 +308,7 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 		}
 		// If there is no next free block then it's the end of memory
 		else {
-			nextBlock = end;
+			nextBlock = (void *)end;
 		}
 		// Iterate over all allocated blocks between 2 free blocks
 		while( allocatedPointer <= (void*)nextBlock) {
@@ -282,8 +319,14 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 			// Get the size of the allocated block
 			size_t blockSize = *(size_t *)((void *)allocatedPointer - sizeof(size_t));
 
+			// BUG: some times, we found allocated blocks of size 0, so this is a temporary fix.
+			if(blockSize > 0) {
+				print(allocatedPointer, blockSize, 0);
+				totalSize += blockSize + sizeof(size_t);
+			}
+
 			//printf("prev : %p; prevSize : %zu; allocated pointer : %p, size : %zu\n", currentFb, currentFb->size, allocatedPointer, blockSize);
-			print(allocatedPointer, blockSize, 0);
+			
 
 			allocatedPointer = (void*) ((void*)allocatedPointer + blockSize + sizeof(size_t));
 		}
@@ -291,6 +334,8 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 
 		currentFb = currentFb->next;
 	}
+
+	printf("total size : %zu\n", totalSize);
 }
 
 void mem_fit(mem_fit_function_t* function) {
@@ -303,17 +348,10 @@ void mem_fit(mem_fit_function_t* function) {
 struct fb* mem_fit_first(struct fb* fb, size_t size) {
 	fb = head;
 
-	// Test the head with all constraints
-	/*if(fb->size >= size + sizeof(struct fb)) {
-		return fb;
-	}
-	else {
-		fb = fb->next;
-	}*/
-
 	while (fb != NULL) {
 
-		// We ensure that either the block will be totally allocated, or either there will be still enough place to 
+		//printf("Zone libre, Adresse : %p, Taille : %lu, next = %p\n", fb, (unsigned long) fb->size, fb->next);
+		// We ensure that either the block will be totally allocated, or there will be still enough place to 
 		// have the struct fb
 		if(fb->size >= size && (fb->size - size == 0 || fb->size - size >= sizeof(struct fb)) ) {
 			break;
