@@ -96,14 +96,6 @@ void* mem_alloc(size_t size) {
 	// The beginning of the allocated space for the user
 	void *userPointer = (void*)freeB + freeB->size - sizeAsked;
 
-	struct fb *newFb = ((void*)userPointer - sizeof(size_t));
-	if(newFb == freeB && (sizeAsked < freeB->size - sizeof(struct fb))) {
-		printf("AAAAAAAAAAAAAAAH\n");
-	}
-	if (newFb < freeB) {
-		printf("AAAAAAAAAAAAAAAH2\n");
-	}
-
 	size_t freeBSize = freeB->size;
 
 
@@ -133,13 +125,6 @@ size_t mem_get_size(void * p) {
 	size_t blockSize = *((size_t *)((void*)p - sizeof(size_t)));
 
 	return blockSize;
-}
-
-// DEBUG
-void afficher_zone1(void *adresse, size_t taille, int free)
-{
-  printf("Zone %s, Adresse : %p, Taille : %lu\n", free?"libre  ":"occupee",
-         adresse, (unsigned long) taille);
 }
 
 void mem_free(void* p) {
@@ -273,11 +258,8 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 			// Get the size of the allocated block
 			size_t blockSize = *(size_t *)((void *)allocatedPointer - sizeof(size_t));
 
-			// BUG: some times, we found allocated blocks of size 0, so this is a temporary fix for debug.
-			if(blockSize > 0) {
-				print(allocatedPointer, blockSize, 0);
-				totalSize += blockSize + sizeof(size_t);
-			}
+			print(allocatedPointer, blockSize, 0);
+			totalSize += blockSize + sizeof(size_t);
 
 			//printf("prev : %p; prevSize : %zu; allocated pointer : %p, size : %zu\n", currentFb, currentFb->size, allocatedPointer, blockSize);
 			
@@ -319,11 +301,8 @@ void mem_show(void (*print)(void *, size_t, int free)) {
 			// Get the size of the allocated block
 			size_t blockSize = *(size_t *)((void *)allocatedPointer - sizeof(size_t));
 
-			// BUG: some times, we found allocated blocks of size 0, so this is a temporary fix.
-			if(blockSize > 0) {
-				print(allocatedPointer, blockSize, 0);
-				totalSize += blockSize + sizeof(size_t);
-			}
+			print(allocatedPointer, blockSize, 0);
+			totalSize += blockSize + sizeof(size_t);
 
 			//printf("prev : %p; prevSize : %zu; allocated pointer : %p, size : %zu\n", currentFb, currentFb->size, allocatedPointer, blockSize);
 			
